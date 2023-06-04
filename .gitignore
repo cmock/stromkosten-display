@@ -2,4 +2,5 @@
 .clang_complete
 .ccls
 *~
+*.FCStd1
 config.h
