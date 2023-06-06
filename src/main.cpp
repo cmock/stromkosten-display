@@ -18,9 +18,8 @@
 #define NUM_LEDS (LED_ROWS * LED_COLS)
 #define LED_PIN 16
 
-// append ".json" for the data and ".expiry" for the expiry time
-#define PRICE_PATH "/prices"
-#define POWER_MONITOR_PATH "/power-monitor"
+#define PRICE_PATH "/prices.json"
+#define POWER_MONITOR_PATH "/power-monitor.json"
 // how long before expiry will we try and fetch?
 #define DATA_EXPIRY_BUFFER 3600
 #define DATA_FETCH_RETRY 600
@@ -29,11 +28,11 @@
 
 #define USER_AGENT "energy-cost-display/0.1 (ESP32HTTPClient) cm@tahina.priv.at"
 
-// https://api.awattar.at/v1/marketdata
-#define AWATTAR_API_URL "https://www.tahina.priv.at/tmp/marketdata.json"
+//#define AWATTAR_API_URL "https://www.tahina.priv.at/tmp/marketdata.json"
+#define AWATTAR_API_URL "https://api.awattar.at/v1/marketdata"
 
-// https://awareness.cloud.apg.at/api/v1/PeakHourStatus
-#define POWER_MONITOR_API_URL "https://www.tahina.priv.at/tmp/PeakHourStatus.json"
+//#define POWER_MONITOR_API_URL "https://www.tahina.priv.at/tmp/PeakHourStatus.json"
+#define POWER_MONITOR_API_URL "https://awareness.cloud.apg.at/api/v1/PeakHourStatus"
 
 #define YELLOW_LIMIT 80
 #define RED_LIMIT 120
@@ -77,6 +76,7 @@ StaticJsonDocument<json_capacity> json_doc;
 char big_buf[BIG_BUF_LEN], big_buf2[BIG_BUF_LEN];
 
 double prices[LED_COLS];
+uint16_t powermonitor[LED_COLS];
 
 WiFiMulti wifiMulti;
 
@@ -118,7 +118,7 @@ time_t parse_awattar_json(char input[], time_t now) {
   
   DeserializationError error = deserializeJson(json_doc, input, MAX_JSON_LEN);
   if(error) {
-    Serial.print("deserializeJson() failed: ");
+    Serial.print("Awattar: deserializeJson() failed: ");
     Serial.println(error.c_str());
     Serial.printf("Capacity: %d\n", json_doc.capacity());
     return 0;
@@ -147,13 +147,63 @@ time_t parse_awattar_json(char input[], time_t now) {
       continue;
     time_t slot = (start_timestamp - now)/3600;
     char buf[1024];
-    sprintf(buf, "%d %d %.2f\n", start_timestamp, slot, marketprice);
+    //sprintf(buf, "%d %d %.2f\n", start_timestamp, slot, marketprice);
     Serial.print(buf);
     if(slot >= LED_COLS)
       continue;
     prices[slot] = marketprice;
   }
   return last_timestamp;
+}
+
+// returns timestamp of "FirstUTC"
+time_t parse_power_monitor_json(char input[], time_t now) {
+  time_t first_timestamp = 0;
+  
+  DeserializationError error = deserializeJson(json_doc, input, MAX_JSON_LEN);
+  if(error) {
+    Serial.print("power_monitor: deserializeJson() failed: ");
+    Serial.println(error.c_str());
+    Serial.printf("Capacity: %d\n", json_doc.capacity());
+    return 0;
+  }
+
+  const char *firstutc = json_doc["FirstUtc"];
+  if(firstutc == NULL) {
+    Serial.println("can't find FirstUtc");
+    return 0;
+  }
+  Serial.printf("FirstUTC = <%s>\n", firstutc);
+  struct tm tm;
+  char *p = strptime(firstutc, "%Y-%m-%dT%H:%M:%SZ", &tm);
+  if(p == NULL || *p != 0) {
+    Serial.printf("strptime failed for 'FirstUtc' %s\n", firstutc);
+    return 0;
+  }
+  first_timestamp = mktime(&tm); // should use timegm(), but that doesn't exist
+
+  uint16_t dflt = json_doc["DefaultStatus"];
+  Serial.printf("FirstUTC %d, DefaultStatus %d\n", first_timestamp, dflt);
+
+  for(uint16_t i = 0; i < LED_COLS; i++)
+    powermonitor[i] = dflt;
+
+  now -= (now % 3600); // round to hour
+  
+  for (JsonObject info : json_doc["StatusInfos"].as<JsonArray>()) {
+    const char *utc = info["utc"];
+    uint16_t s = info["s"];
+    char *p = strptime(utc, "%Y-%m-%dT%H:%M:%SZ", &tm);
+    if(p == NULL || *p != 0) {
+      Serial.printf("strptime failed for 'utc' %s\n", firstutc);
+      return 0;
+    }
+    time_t utc_t = mktime(&tm);
+    int16_t hrs = (utc_t - now)/3600;
+    if(hrs >= 0 && hrs < LED_COLS)
+      powermonitor[hrs] = s;
+  }
+  return first_timestamp;
 }
 
 void writeFile(fs::FS &fs, const char * path, const char * message){
@@ -187,9 +237,27 @@ void fetch_awattar() {
   state.price_expiry = last_price;
   state.valid_price_data = true;
   // write cache
-  writeFile(LittleFS, PRICE_PATH ".json", big_buf2);
+  writeFile(LittleFS, PRICE_PATH, big_buf2);
 }
 
+void fetch_power_monitor() {
+  time_t now = time(NULL);
+  // fetch
+  if(!GET(POWER_MONITOR_API_URL, big_buf, BIG_BUF_LEN))
+    return;
+  // copy big_buf because json parsing modifies it...
+  memcpy(big_buf2, big_buf, BIG_BUF_LEN);
+  // check
+  time_t start_time = parse_power_monitor_json(big_buf, now);
+  if(start_time == 0)
+    return;
+  // update expiry time
+  state.powermonitor_expiry = start_time + 25 * 3600;
+  state.valid_monitor_data = true;
+  // write cache
+  writeFile(LittleFS, POWER_MONITOR_PATH, big_buf2);
+}
+  
 
 bool readFile(fs::FS &fs, const char * path, char *buf, size_t maxlen){
   char *p = buf;
@@ -221,11 +289,8 @@ bool readFile(fs::FS &fs, const char * path, char *buf, size_t maxlen){
 bool read_caches() {
   time_t now = time(NULL);
   
-  if(readFile(LittleFS, PRICE_PATH ".json", big_buf, BIG_BUF_LEN)) {
-    Serial.println("read " PRICE_PATH ".json");
-    // Serial.println("---");
-    // Serial.println(big_buf);
-    // Serial.println("---");
+  if(readFile(LittleFS, PRICE_PATH, big_buf, BIG_BUF_LEN)) {
+    Serial.println("read " PRICE_PATH);
     time_t last_price = parse_awattar_json(big_buf, now);
     if(last_price != 0) {
       // update expiry time
@@ -233,11 +298,13 @@ bool read_caches() {
       state.valid_price_data = true;
     }
   }
-  if(readFile(LittleFS, POWER_MONITOR_PATH ".json", big_buf, BIG_BUF_LEN)) {
-    Serial.println("read " POWER_MONITOR_PATH " .json");
-  }
-  if(readFile(LittleFS, POWER_MONITOR_PATH ".expiry", big_buf, BIG_BUF_LEN)) {
-    Serial.println("read " POWER_MONITOR_PATH " .expiry");
+  if(readFile(LittleFS, POWER_MONITOR_PATH, big_buf, BIG_BUF_LEN)) {
+    Serial.println("read " POWER_MONITOR_PATH);
+    time_t first_monitor = parse_power_monitor_json(big_buf, now);
+    if(first_monitor != 0) {
+      state.powermonitor_expiry = first_monitor + 25 * 3600;
+      state.valid_monitor_data = true;
+    }
   }
   return true;
 }
@@ -381,6 +448,7 @@ void loop() {
     if(state.last_fetch_powermonitor + DATA_FETCH_RETRY < now &&
        state.powermonitor_expiry < now + DATA_EXPIRY_BUFFER) {
       Serial.println("fetch APG");
+      fetch_power_monitor();
       state.last_fetch_powermonitor = now;
       print_timers();
     }
@@ -395,10 +463,11 @@ void loop() {
 	  black);
     }
     //Serial.println("bars");
-    leds.Show();
   }
   if(state.valid_monitor_data) {
     // show monitor data
+    for (uint16_t i = 0; i < LED_COLS; i++)
+      leds.SetPixelColor(topo.Map(i, 0), powermonitor[i] == 1 ? green : red);
   }
   if(!state.valid_price_data && !state.valid_monitor_data) { // show system state
     // first N pixels:
@@ -413,9 +482,7 @@ void loop() {
     leds.SetPixelColor(2, state.valid_time ? green : red);
     leds.SetPixelColor(3, state.valid_price_data ? green: red);
     leds.SetPixelColor(4, state.valid_monitor_data ? green: red);
-    leds.Show();
     //    delay(500);
   }
-
-
+  leds.Show();
 }
