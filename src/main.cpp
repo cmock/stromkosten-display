@@ -57,8 +57,8 @@ NeoTopology<RowMajorLayout> topo(LED_ROWS, LED_COLS);
 
 RgbColor red(255, 0, 0);
 RgbColor green(0, 255, 0);
-RgbColor blue(0, 0, 255);
-RgbColor yellow(255, 255, 0);
+RgbColor yellow(255, 200, 0);
+RgbColor blue(0,120,255);
 RgbColor white(255);
 RgbColor black(0);
 
@@ -147,7 +147,7 @@ time_t parse_awattar_json(char input[], time_t now) {
       continue;
     time_t slot = (start_timestamp - now)/3600;
     char buf[1024];
-    //sprintf(buf, "%d %d %.2f\n", start_timestamp, slot, marketprice);
+    sprintf(buf, "%d %d %.2f\n", start_timestamp, slot, marketprice);
     Serial.print(buf);
     if(slot >= LED_COLS)
       continue;
@@ -234,7 +234,7 @@ void fetch_awattar() {
   if(last_price == 0)
     return;
   // update expiry time
-  state.price_expiry = last_price;
+  state.price_expiry = last_price - 9 * 3600;
   state.valid_price_data = true;
   // write cache
   writeFile(LittleFS, PRICE_PATH, big_buf2);
@@ -294,7 +294,7 @@ bool read_caches() {
     time_t last_price = parse_awattar_json(big_buf, now);
     if(last_price != 0) {
       // update expiry time
-      state.price_expiry = last_price;
+      state.price_expiry = last_price - 9 * 3600;
       state.valid_price_data = true;
     }
   }
@@ -317,22 +317,20 @@ void bar(uint16_t col, double len, RgbColor color, RgbColor bgcolor) {
   if(len > 1.0)
     len = 1.0;
 
-  uint16_t full = len * LED_ROWS; // integer part
-  float frac = len * LED_ROWS - full;
-  char buf[1024];
-  //  sprintf(buf, "blend: len %.2f, full %d, frac %.1f\n", len, full, frac);
-  //  Serial.print(buf);
+  uint16_t full = fabs(len) * (LED_ROWS-1); // integer part
+  float frac = fabs(len) * (LED_ROWS-1) - full;
+  //  Serial.printf("blend: len %.2f, full %d, frac %.1f\n", len, full, frac);
   
   // clear
   for(uint16_t y = 0; y < LED_ROWS; y++)
     leds.SetPixelColor(topo.Map(col, y), bgcolor);
-  // always set lowest pixel
-  leds.SetPixelColor(topo.Map(col, LED_ROWS-1), color);
   for(uint16_t y = 1; y <= full; y++)
     leds.SetPixelColor(topo.Map(col, LED_ROWS-y), color);
   if(frac > 0.09)
     leds.SetPixelColor(topo.Map(col, LED_ROWS-full-1),
 		       RgbColor::LinearBlend(black, color, frac));
+  // always set lowest pixel
+  leds.SetPixelColor(topo.Map(col, LED_ROWS-1), color);
 }
 
 void printTime()
@@ -459,7 +457,8 @@ void loop() {
     for (uint16_t i = 0; i < LED_COLS; i++) {
       bar(i, prices[i]/PRICE_MAX, (prices[i] >= RED_LIMIT ? red : 
 				   (prices[i] >= YELLOW_LIMIT ? yellow :
-				    green)),
+				    (prices[i] < 0 ? blue :
+				     green))),
 	  black);
     }
     //Serial.println("bars");
