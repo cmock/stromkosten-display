@@ -1,0 +1,19 @@
+// zwei SSIDs, die erste vorhandene wird verwendet
+#define WIFI1_SSID "SSID1"
+#define WIFI1_PSK "PSK1"
+#define WIFI2_SSID "SSID2"
+#define WIFI2_PSK "PSK2"
+
+// skalierung der balken, in EUR/MWh (so wie die daten vom API kommen)
+#define YELLOW_LIMIT 80
+#define RED_LIMIT 120
+#define PRICE_MAX 160
+
+// helligkeit der LEDs, 0..255
+#define LED_BRIGHTNESS 64
+
+#define HOSTNAME "energydisplay"
+#define NTP_SERVER "pool.ntp.org"
+#define TIME_ZONE "CET-1CEST,M3.5.0,M10.5.0/3"
+
+

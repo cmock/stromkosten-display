@@ -11,8 +11,6 @@
 
 #include "config.h"
 
-#include "awattar_testdata.h"
-
 #define LED_ROWS 8
 #define LED_COLS 8
 #define NUM_LEDS (LED_ROWS * LED_COLS)
@@ -28,15 +26,9 @@
 
 #define USER_AGENT "energy-cost-display/0.1 (ESP32HTTPClient) cm@tahina.priv.at"
 
-//#define AWATTAR_API_URL "https://www.tahina.priv.at/tmp/marketdata.json"
 #define AWATTAR_API_URL "https://api.awattar.at/v1/marketdata"
 
-//#define POWER_MONITOR_API_URL "https://www.tahina.priv.at/tmp/PeakHourStatus.json"
 #define POWER_MONITOR_API_URL "https://awareness.cloud.apg.at/api/v1/PeakHourStatus"
-
-#define YELLOW_LIMIT 80
-#define RED_LIMIT 120
-#define PRICE_MAX 160
 
 #define FORMAT_LITTLEFS_IF_FAILED true
 
@@ -52,8 +44,6 @@ struct {
 
 NeoPixelBusLg<NeoGrbFeature, NeoEsp32I2s0Ws2812xMethod> leds(NUM_LEDS, LED_PIN);
 NeoTopology<RowMajorLayout> topo(LED_ROWS, LED_COLS);
-
-#define brightness 64
 
 RgbColor red(255, 0, 0);
 RgbColor green(0, 255, 0);
@@ -395,7 +385,7 @@ void setup() {
   Serial.print("json_capacity: "); Serial.println(json_capacity);
   //  FastLED.addLeds<NEOPIXEL, LED_PIN>(leds, NUM_LEDS);
   leds.Begin();
-  leds.SetLuminance(brightness);
+  leds.SetLuminance(LED_BRIGHTNESS);
   leds.ClearTo(black);
   leds.SetPixelColor(0, green); // show power on state
   leds.SetPixelColor(1, red); // show waiting for wifi
