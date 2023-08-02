@@ -15,7 +15,7 @@ Die Preise kommen über die
 
 ## Ablesen
 
-Der linke senkrechte Balken ist der Preis der aktuellen volle Stunde,
+Der linke senkrechte Balken ist der Preis der aktuellen vollen Stunde,
 nach rechts sind dann die folgenden Stunden.
 
 Die Länge und Farbe der Balken gibt den Preis an, grün bis 8¢/kWh,
